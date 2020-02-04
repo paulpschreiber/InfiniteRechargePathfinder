@@ -34,7 +34,9 @@ public class DriveSubsystem extends SubsystemBase {
   private static final double MAX_JERK = 1.0;
   private static final int TICKS_PER_REV = 4096;
   private static final double WHEEL_DIAMETER = 0.0635; // In meters
-  private static final double TICKS_PER_METER = (0.1 / (WHEEL_DIAMETER * Math.PI)) * TICKS_PER_REV;
+  private static final double TICKS_PER_METER = TICKS_PER_REV / (WHEEL_DIAMETER * Math.PI);
+  private static final double kP_PATH = 0.1;
+  private static final double kV_PATH = 1/ MAX_VELOCITY;
 
   private final SwerveDrive swerve = configSwerve();
   private final Logger logger = LoggerFactory.getLogger(this.getClass());
@@ -42,6 +44,7 @@ public class DriveSubsystem extends SubsystemBase {
   private EncoderFollower follower = new EncoderFollower();
   private Trajectory trajectoryGenerated;
   private int talonPosition;
+  private int segments;
 
   public DriveSubsystem() {
     swerve.setFieldOriented(true);
@@ -152,21 +155,27 @@ public class DriveSubsystem extends SubsystemBase {
   }
 
   public void startPath() {
-    follower.setTrajectory(trajectoryGenerated);
+    segments = 0;
+    //follower.setTrajectory(trajectoryGenerated);
     talonPosition = swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition();
-    follower.configureEncoder(talonPosition, TICKS_PER_REV, WHEEL_DIAMETER);
-    follower.configurePIDVA(1.0, 0.0, 0.0, 1 / MAX_VELOCITY, 0);
+    //follower.configureEncoder(talonPosition, TICKS_PER_REV, WHEEL_DIAMETER);
+    //follower.configurePIDVA(1.0, 0.0, 0.0, 1 / MAX_VELOCITY, 0);
     swerve.setDriveMode(DriveMode.CLOSED_LOOP);
   }
 
   public void updatePathOutput() {
-    double rawOutput = follower.calculate(Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition() - talonPosition)); // Meters per second
-    double output = (rawOutput * TICKS_PER_METER) / MAX_VELOCITY; // Ticks per 100ms
-    double heading = Pathfinder.boundHalfDegrees(Pathfinder.r2d(follower.getHeading()));
-    double forward = Math.cos(Pathfinder.d2r(heading)) * output, 
-           strafe = Math.sin(Pathfinder.d2r(heading)) * output;
-    drive(forward, strafe, 0.0);
-    
+    if (segments < trajectoryGenerated.length()) {
+      double desiredDistance = trajectoryGenerated.get(segments).position;
+      double currentDistance = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition() / TICKS_PER_METER);
+      double error = desiredDistance - currentDistance;
+      double rawOutput = kP_PATH * error + kV_PATH * trajectoryGenerated.get(segments).velocity;
+      //double rawOutput = follower.calculate(Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition() - talonPosition)); // Meters per second
+      double output = (rawOutput * TICKS_PER_METER) / MAX_VELOCITY; // Ticks per 100ms
+      double heading = Pathfinder.boundHalfDegrees(Pathfinder.r2d(follower.getHeading()));
+      double forward = Math.cos(Pathfinder.d2r(heading)) * output, 
+             strafe = Math.sin(Pathfinder.d2r(heading)) * output;
+      drive(forward, strafe, 0.0);
+    }
   }
 
   public boolean isPathDone() {
