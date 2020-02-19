@@ -155,7 +155,6 @@ public class DriveSubsystem extends SubsystemBase {
   }
 
   public void startPath() {
-    segments = 0;
     // follower.setTrajectory(trajectoryGenerated);
     talonPosition = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition());
     // follower.configureEncoder(talonPosition, TICKS_PER_REV, WHEEL_DIAMETER);
