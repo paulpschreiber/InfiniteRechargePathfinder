@@ -17,12 +17,12 @@ public class PathCommand extends CommandBase {
   @Override
   public void initialize() {
     driveSubsystem.startPath();
-    startTimeSeconds = System.currentTimeMillis() / 100;
+    startTimeSeconds = System.currentTimeMillis() / 1000;
   }
 
   @Override
   public void execute() {
-    double currentTimeSeconds = System.currentTimeMillis() / 100;
+    double currentTimeSeconds = System.currentTimeMillis() / 1000;
     driveSubsystem.updatePathOutput(currentTimeSeconds - startTimeSeconds);
   }
 
