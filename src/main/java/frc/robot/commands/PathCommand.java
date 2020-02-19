@@ -8,6 +8,7 @@ import org.strykeforce.thirdcoast.swerve.SwerveDrive.DriveMode;
 public class PathCommand extends CommandBase {
 
   private DriveSubsystem driveSubsystem = RobotContainer.DRIVE;
+  private double startTimeSeconds;
 
   public PathCommand() {
     addRequirements(driveSubsystem);
@@ -16,16 +17,18 @@ public class PathCommand extends CommandBase {
   @Override
   public void initialize() {
     driveSubsystem.startPath();
+    startTimeSeconds = System.currentTimeMillis() / 100;
   }
 
   @Override
   public void execute() {
-    driveSubsystem.updatePathOutput();
+    double currentTimeSeconds = System.currentTimeMillis() / 100;
+    driveSubsystem.updatePathOutput(currentTimeSeconds - startTimeSeconds);
   }
 
   @Override
   public boolean isFinished() {
-    return driveSubsystem.isPathDone();
+    return driveSubsystem.isPathDone(startTimeSeconds);
   }
 
   @Override

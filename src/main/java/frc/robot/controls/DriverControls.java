@@ -10,6 +10,7 @@ public class DriverControls {
   DriverControls(int portNumber) {
     joystick = new Joystick(portNumber);
     new JoystickButton(joystick, Button.RESET.id).whenPressed(new ZeroGyroCommand());
+    // new JoystickButton(joystick, Button.RESET.id).whenPressed(new PathCommand());
   }
   /** Left stick X (up-down) axis. */
   public double getForward() {

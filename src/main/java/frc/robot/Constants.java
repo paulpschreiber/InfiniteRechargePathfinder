@@ -7,7 +7,8 @@
 
 package frc.robot;
 
-import jaci.pathfinder.Waypoint;
+import edu.wpi.first.wpilibj.geometry.Pose2d;
+import edu.wpi.first.wpilibj.geometry.Rotation2d;
 
 /**
  * The Constants class provides a convenient place for teams to hold robot-wide numerical or boolean
@@ -18,6 +19,7 @@ import jaci.pathfinder.Waypoint;
  * constants are needed, to reduce verbosity.
  */
 public final class Constants {
-  public static Waypoint[] AUTO_PATH =
-      new Waypoint[] {new Waypoint(0, 0, 0), new Waypoint(0, 1, 0)};
+  public static final Pose2d START_PATH = new Pose2d(0.0, 0.0, new Rotation2d(0.0));
+  public static final Pose2d END_PATH = new Pose2d(0.0, 1.0, new Rotation2d(0.0));
 }
+// wheel.0: 2029; wheel.1: 2288; wheel.2: 2013; wheel.3: 2066
