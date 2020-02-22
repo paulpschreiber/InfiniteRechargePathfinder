@@ -2,6 +2,7 @@ package frc.robot.controls;
 
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj2.command.button.JoystickButton;
+import frc.robot.commands.PathCommand;
 import frc.robot.commands.ZeroGyroCommand;
 
 public class DriverControls {
@@ -10,7 +11,7 @@ public class DriverControls {
   DriverControls(int portNumber) {
     joystick = new Joystick(portNumber);
     new JoystickButton(joystick, Button.RESET.id).whenPressed(new ZeroGyroCommand());
-    // new JoystickButton(joystick, Button.RESET.id).whenPressed(new PathCommand());
+    new JoystickButton(joystick, Button.HAMBURGER.id).whenPressed(new PathCommand());
   }
   /** Left stick X (up-down) axis. */
   public double getForward() {

@@ -8,15 +8,18 @@ import com.ctre.phoenix.motorcontrol.can.TalonSRXConfiguration;
 import com.kauailabs.navx.frc.AHRS;
 import edu.wpi.first.wpilibj.SPI;
 import edu.wpi.first.wpilibj.geometry.Translation2d;
+import edu.wpi.first.wpilibj.kinematics.SwerveDriveKinematics;
+import edu.wpi.first.wpilibj.kinematics.SwerveDriveOdometry;
 import edu.wpi.first.wpilibj.trajectory.Trajectory;
 import edu.wpi.first.wpilibj.trajectory.TrajectoryConfig;
 import edu.wpi.first.wpilibj.trajectory.TrajectoryGenerator;
+import edu.wpi.first.wpilibj.util.Units;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.RobotContainer;
-import jaci.pathfinder.Pathfinder;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.function.DoubleSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.strykeforce.thirdcoast.swerve.SwerveDrive;
@@ -24,9 +27,13 @@ import org.strykeforce.thirdcoast.swerve.SwerveDrive.DriveMode;
 import org.strykeforce.thirdcoast.swerve.SwerveDriveConfig;
 import org.strykeforce.thirdcoast.swerve.Wheel;
 import org.strykeforce.thirdcoast.telemetry.TelemetryService;
+import org.strykeforce.thirdcoast.telemetry.item.Measurable;
+import org.strykeforce.thirdcoast.telemetry.item.Measure;
 import org.strykeforce.thirdcoast.telemetry.item.TalonItem;
 
-public class DriveSubsystem extends SubsystemBase {
+public class DriveSubsystem extends SubsystemBase implements Measurable {
+
+  private static TelemetryService telemetryService;
 
   private static final double ROBOT_LENGTH = 1.0;
   private static final double ROBOT_WIDTH = 1.0;
@@ -36,7 +43,7 @@ public class DriveSubsystem extends SubsystemBase {
   private static final int TICKS_PER_REV = 9011;
   private static final double WHEEL_DIAMETER = 0.0635; // In meters
   private static final double TICKS_PER_METER = TICKS_PER_REV / (WHEEL_DIAMETER * Math.PI);
-  private static final double kP_PATH = 0.1;
+  private static final double kP_PATH = 0.7;
   private static final double MAX_VELOCITY_MPS = (MAX_VELOCITY * 10) / TICKS_PER_METER;
   private static final double kV_PATH = 1 / MAX_VELOCITY_MPS;
 
@@ -45,10 +52,24 @@ public class DriveSubsystem extends SubsystemBase {
 
   private Trajectory trajectoryGenerated;
   private int talonPosition;
+  private double estimatedDistanceTraveled;
+  private Translation2d lastPosition;
+  private double currentDistance;
+  private double desiredDistance;
+  private double error;
+
+  // Odometry stuff
+
+  private Translation2d[] wheelsMeters = {new Translation2d(Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(-Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(-Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0))};
+  private SwerveDriveOdometry swerveOdometry = new SwerveDriveOdometry(new SwerveDriveKinematics(wheelsMeters), gyroAngle);
 
   public DriveSubsystem() {
     swerve.setFieldOriented(true);
     zeroAzimuth();
+    telemetryService = RobotContainer.TELEMETRY;
+    telemetryService.stop();
+    telemetryService.register(this);
+    telemetryService.start();
   }
 
   public void drive(double forward, double strafe, double yaw) {
@@ -146,7 +167,7 @@ public class DriveSubsystem extends SubsystemBase {
 
   // Pathfinder Stuff
   public void calculateTrajctory() {
-    List<Translation2d> path = new ArrayList<>();
+    List<Translation2d> path = Constants.INTERNAL_POINTS;
     TrajectoryConfig trajectoryConfig = new TrajectoryConfig(MAX_VELOCITY_MPS, MAX_ACCELERATION);
 
     trajectoryGenerated =
@@ -157,6 +178,9 @@ public class DriveSubsystem extends SubsystemBase {
   public void startPath() {
     // follower.setTrajectory(trajectoryGenerated);
     talonPosition = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition());
+    lastPosition = Constants.START_PATH.getTranslation();
+    estimatedDistanceTraveled = 0;
+    desiredDistance = 0;
     // follower.configureEncoder(talonPosition, TICKS_PER_REV, WHEEL_DIAMETER);
     // follower.configurePIDVA(1.0, 0.0, 0.0, 1 / MAX_VELOCITY, 0);
     swerve.setDriveMode(DriveMode.CLOSED_LOOP);
@@ -164,26 +188,81 @@ public class DriveSubsystem extends SubsystemBase {
 
   public void updatePathOutput(double timeSeconds) {
     Trajectory.State currentState = trajectoryGenerated.sample(timeSeconds);
-    double desiredDistance =
-        currentState.poseMeters.getTranslation().getDistance(Constants.START_PATH.getTranslation());
-    double currentDistance =
+    estimatedDistanceTraveled += currentState.poseMeters.getTranslation().getDistance(lastPosition);
+    desiredDistance = estimatedDistanceTraveled;
+    currentDistance =
         Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition() - talonPosition)
             / TICKS_PER_METER;
-    double error = desiredDistance - currentDistance;
+    System.out.println("Desired dist: " + desiredDistance + " Current dist: " + currentDistance);
+    error = desiredDistance - currentDistance;
     double rawOutput = kP_PATH * error + kV_PATH * currentState.velocityMetersPerSecond;
     // double rawOutput =
     // follower.calculate(Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition()
     // - talonPosition)); // Meters per second
     double output = (rawOutput * TICKS_PER_METER) / (MAX_VELOCITY * 10); // Ticks per 100ms
-    double heading =
-        Pathfinder.boundHalfDegrees(
-            Pathfinder.r2d(currentState.poseMeters.getRotation().getDegrees()));
-    double forward = Math.cos(Pathfinder.d2r(heading)) * output,
-        strafe = Math.sin(Pathfinder.d2r(heading)) * output;
+    double heading = currentState.poseMeters.getRotation().getRadians();
+    double forward = Math.cos(heading) * output, strafe = Math.sin(heading) * output;
     drive(forward, strafe, 0.0);
+    lastPosition = currentState.poseMeters.getTranslation();
   }
 
   public boolean isPathDone(double timePassedSeconds) {
     return timePassedSeconds >= trajectoryGenerated.getTotalTimeSeconds();
+  }
+
+  public void startPathOdometry() {
+    talonPosition = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition());
+  }
+
+  public void updatePathOdometry(double timeSeconds) {
+
+  }
+
+  // Telemetry stuff
+
+  @Override
+  public Set<Measure> getMeasures() {
+    return Set.of(
+        new Measure("DesiredDistance", "DesiredDistance"),
+        new Measure("CurrentDistance", "CurrentDistance"),
+        new Measure("DistanceError", "DistanceError"));
+  }
+
+  @Override
+  public DoubleSupplier measurementFor(Measure arg0) {
+    switch (arg0.getName()) {
+      case "DesiredDistance":
+        return () -> desiredDistance;
+      case "CurrentDistance":
+        return () -> currentDistance;
+      case "DistanceError":
+        return () -> error;
+      default:
+        return () -> -2767.0;
+    }
+  }
+
+  @Override
+  public int compareTo(Measurable arg0) {
+    // TODO Auto-generated method stub
+    return 0;
+  }
+
+  @Override
+  public String getType() {
+    // TODO Auto-generated method stub
+    return "AutoPathing";
+  }
+
+  @Override
+  public String getDescription() {
+    // TODO Auto-generated method stub
+    return "AutoPathing";
+  }
+
+  @Override
+  public int getDeviceId() {
+    // TODO Auto-generated method stub
+    return 0;
   }
 }
