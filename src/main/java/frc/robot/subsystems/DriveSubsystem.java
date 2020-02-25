@@ -7,9 +7,12 @@ import com.ctre.phoenix.motorcontrol.can.TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.TalonSRXConfiguration;
 import com.kauailabs.navx.frc.AHRS;
 import edu.wpi.first.wpilibj.SPI;
+import edu.wpi.first.wpilibj.geometry.Pose2d;
+import edu.wpi.first.wpilibj.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.geometry.Translation2d;
 import edu.wpi.first.wpilibj.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.wpilibj.kinematics.SwerveDriveOdometry;
+import edu.wpi.first.wpilibj.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.trajectory.Trajectory;
 import edu.wpi.first.wpilibj.trajectory.TrajectoryConfig;
 import edu.wpi.first.wpilibj.trajectory.TrajectoryGenerator;
@@ -60,12 +63,24 @@ public class DriveSubsystem extends SubsystemBase implements Measurable {
 
   // Odometry stuff
 
-  private Translation2d[] wheelsMeters = {new Translation2d(Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(-Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)), new Translation2d(-Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0))};
-  private SwerveDriveOdometry swerveOdometry = new SwerveDriveOdometry(new SwerveDriveKinematics(wheelsMeters), gyroAngle);
+  private Translation2d[] wheelsMeters = {
+    new Translation2d(
+        Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)),
+    new Translation2d(
+        Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0)),
+    new Translation2d(
+        -Units.inchesToMeters(ROBOT_LENGTH / 2.0), -Units.inchesToMeters(ROBOT_WIDTH / 2.0)),
+    new Translation2d(
+        -Units.inchesToMeters(ROBOT_LENGTH / 2.0), Units.inchesToMeters(ROBOT_WIDTH / 2.0))
+  };
+  private SwerveDriveOdometry swerveOdometry;
 
   public DriveSubsystem() {
     swerve.setFieldOriented(true);
     zeroAzimuth();
+    swerveOdometry =
+        new SwerveDriveOdometry(
+            new SwerveDriveKinematics(wheelsMeters), new Rotation2d(swerve.getGyro().getAngle()));
     telemetryService = RobotContainer.TELEMETRY;
     telemetryService.stop();
     telemetryService.register(this);
@@ -175,12 +190,15 @@ public class DriveSubsystem extends SubsystemBase implements Measurable {
             Constants.START_PATH, path, Constants.END_PATH, trajectoryConfig);
   }
 
+  // Manual Methods
+
   public void startPath() {
     // follower.setTrajectory(trajectoryGenerated);
     talonPosition = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition());
     lastPosition = Constants.START_PATH.getTranslation();
     estimatedDistanceTraveled = 0;
     desiredDistance = 0;
+    error = 0.0;
     // follower.configureEncoder(talonPosition, TICKS_PER_REV, WHEEL_DIAMETER);
     // follower.configurePIDVA(1.0, 0.0, 0.0, 1 / MAX_VELOCITY, 0);
     swerve.setDriveMode(DriveMode.CLOSED_LOOP);
@@ -210,12 +228,50 @@ public class DriveSubsystem extends SubsystemBase implements Measurable {
     return timePassedSeconds >= trajectoryGenerated.getTotalTimeSeconds();
   }
 
+  // Odometry Methods
+
   public void startPathOdometry() {
+    error = 0.0;
     talonPosition = Math.abs(swerve.getWheels()[0].getDriveTalon().getSelectedSensorPosition());
+    swerve.setDriveMode(DriveMode.CLOSED_LOOP);
   }
 
   public void updatePathOdometry(double timeSeconds) {
+    updateOdometryState(timeSeconds);
+    Trajectory.State currentState = trajectoryGenerated.sample(timeSeconds);
 
+    Pose2d currentPos = swerveOdometry.getPoseMeters();
+    Pose2d pathPos = currentState.poseMeters;
+
+    error = pathPos.getTranslation().getDistance(currentPos.getTranslation());
+    double rawOutput = kP_PATH * error + kV_PATH * currentState.velocityMetersPerSecond;
+
+    double output = (rawOutput * TICKS_PER_METER) / (MAX_VELOCITY * 10); // Ticks per 100ms
+    double heading = pathPos.getRotation().getRadians();
+    double forward = Math.cos(heading) * output, strafe = Math.sin(heading) * output;
+
+    drive(forward, strafe, 0.0);
+  }
+
+  public void updateOdometryState(double timeSeconds) {
+    SwerveModuleState[] wheelStates = new SwerveModuleState[4];
+    Wheel[] wheels = swerve.getWheels();
+    for (int i = 0; i < 4; i++) {
+      double velocity =
+          (wheels[i].getDriveTalon().getSelectedSensorVelocity() * 10) / TICKS_PER_METER;
+      Rotation2d angle =
+          new Rotation2d(
+              (((wheels[i].getAzimuthTalon().getSelectedSensorPosition()) % 4096) / 4096)
+                  * (2 * Math.PI));
+      wheelStates[i] = new SwerveModuleState(velocity, angle);
+    }
+    swerveOdometry.updateWithTime(
+        timeSeconds,
+        new Rotation2d(Units.degreesToRadians(swerve.getGyro().getAngle() % 360)),
+        wheelStates[0],
+        wheelStates[1],
+        wheelStates[2],
+        wheelStates[3]);
   }
 
   // Telemetry stuff
